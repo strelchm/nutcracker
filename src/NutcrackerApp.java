@@ -58,6 +58,7 @@ public class NutcrackerApp {
         new HoroscopeCreatingAction(result, (Nut) krakatuk, astronomer, drosselmaster).run();
         new HoroscopeResultReadingAction(result, astronomer, drosselmaster).run();
 
+        // Krakatuk description
         Nutcracker nutcracker = (Nutcracker) heroFactory.createHero(HeroType.NUTCRACKER);
         Optional.ofNullable(krakatuk).map(Nut.class::cast) // condition chain
                 .filter(nut -> nutcracker.isNeverShaved() && !nutcracker.isWearBoots())
