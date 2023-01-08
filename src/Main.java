@@ -1,18 +1,20 @@
 
 import java.util.*;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
 import java.util.logging.Logger;
 
 public class Main {
+    private static final Logger LOGGER = Logger.getLogger(Main.class.getName());
     public static final int BOOK_HEAP_BOOK_COUNT = 20;
     public static final Pair<Double, WeightUnit> KARATUK_ARMOR_PIERCING_DEGREE = new Pair<>(48.0, WeightUnit.POUND);
     public static final int NUTCRACKER_STEPS_WITH_NUT_CORE_NUMBER = 7;
-    public static final String PRINCESS_BEAUTY_REGAIN_CONDITION = "The beauty of the princess will return to her again " +
-            "if the Krakatuk nut is found and the princess is given to eat its delicious kernel";
+    public static final long TIME_UNTIL_NIGHT_MS = 5000L;
+    public static final String PRINCESS_BEAUTY_REGAIN_CONDITION = "The beauty of the princess will return " +
+            "to her again if the Krakatuk nut is found and the princess is given to eat its delicious kernel";
     public static final int STAR_COUNT = 100;
 
-    private static final Logger LOGGER = Logger.getLogger(Main.class.getName());
 
     public static void main(String[] args) {
         HeroFactory heroFactory = new HeroFactory();
@@ -30,7 +32,11 @@ public class Main {
         drosselmaster.doAction(askAction);
 
         if (astronomer.containsFriends(drosselmaster) && drosselmaster.containsFriends(astronomer)) {
-            HeroAction cryingHugAction = new CryingActionProxy(new HugAction(drosselmaster, astronomer), drosselmaster, astronomer);
+            HeroAction cryingHugAction = new CryingActionProxy(
+                    new HugAction(drosselmaster, astronomer),
+                    drosselmaster,
+                    astronomer
+            );
             drosselmaster.doAction(cryingHugAction);
         }
 
@@ -38,7 +44,7 @@ public class Main {
 
         BookSubject[] bookSubjects = {BookSubject.SYMPATHIES, BookSubject.ANTIPATHIES,
                 BookSubject.INSTINCT, BookSubject.ETC_WISE_THINGS};
-        new BookLearnActionUntilNight(getBookHeap(BOOK_HEAP_BOOK_COUNT, bookSubjects), astronomer, drosselmaster).run();
+        new BookLearnUntilNightAction(getBookHeap(BOOK_HEAP_BOOK_COUNT, bookSubjects), astronomer, drosselmaster).run();
 
         List<Star> stars = getStars(STAR_COUNT);
         astronomer.doAction(new TelescopePointedAction(astronomer, stars));
@@ -59,7 +65,7 @@ public class Main {
 //        и принцессе дадут скушать его вкусное ядрышко.
 
         Nutcracker nutcracker = (Nutcracker) heroFactory.createHero(HeroType.NUTCRACKER);
-        Optional.ofNullable(karatuk).map(nut -> (Nut) nut)
+        Optional.ofNullable(karatuk).map(nut -> (Nut) nut) // condition chain
                 .filter(nut -> nutcracker.isNeverShaved() && !nutcracker.isWearBoots())
                 .map(peek(nut -> nutcracker.doAction(new SingleHeroAction(nutcracker) {
                     @Override
@@ -77,16 +83,6 @@ public class Main {
                     nutcracker.doAction(closedEyesDoingActionsProxy);
                 }))
                 .ifPresent(nut -> princess.doAction(new RegainedPrincessBeautyAction(princess)));
-//        Horoscope horoscope = new HoroscopeFactory().createHoroscope(stars);
-//        nutcracker.doAction();
-
-//        List<Book> filteredBooks = books.stream().filter(Book::containsSubject).toList();
-
-//        Орех Кракатук имел такую твердую скорлупу, что ее не могло бы пробить сорокавосьмифунтовое пушечное ядро.
-//        Мало того — этот орех должен был разгрызть на глазах у принцессы маленький человечек,
-//        который еще ни разу не брился и не носил сапогов. Кроме того, человечку необходимо было подать
-//        принцессе ядро от разгрызенного ореха с зажмуренными глазами, а затем отступить семь шагов назад,
-//        ни разу не споткнувшись, и вновь открыть глаза.
     }
 
     private static List<Star> getStars(int starCount) {
@@ -107,7 +103,7 @@ public class Main {
     private static BookHeap getBookHeap(int bookHeapBookCount, BookSubject[] bookSubjects) {
         List<Book> books = new ArrayList<>();
         for (int i = 0; i < bookHeapBookCount; i++) {
-            books.add(new Book("Book %s".formatted(Math.random())));
+            books.add(new Book("Book %d".formatted(i)));
         }
         return new BookHeap(books, bookSubjects);
     }
@@ -424,6 +420,7 @@ public class Main {
 
     interface HeroAction extends Runnable {
         boolean isGroupAction();
+
         default boolean isProxy() {
             return false;
         }
@@ -637,7 +634,8 @@ public class Main {
 
         @Override
         public void run() {
-            LOGGER.info("CloseDownAction process between %s".formatted(PersonUtilityHelper.getPersonNamesByPersons(persons))); // TODO
+            LOGGER.info("CloseDownAction process between %s"
+                    .formatted(PersonUtilityHelper.getPersonNamesByPersons(persons))); // TODO
         }
     }
 
@@ -699,7 +697,7 @@ public class Main {
 
         @Override
         public void run() {
-            LOGGER.info("%s read horoscope result precondition: %s"
+            LOGGER.info("%s read horoscope result precondition with delight: %s"
                     .formatted(
                             PersonUtilityHelper.getPersonNamesByPersons(persons),
                             result.action
@@ -708,26 +706,36 @@ public class Main {
         }
     }
 
-    static class BookLearnActionUntilNight extends GroupHeroAction {
+    static class BookLearnUntilNightAction extends GroupHeroAction {
         private final BookHeap bookHeap;
+        private final ForkJoinPool customForkJoinPool; // not to use ForkJoinPool.commonPool, but use (optimistically) thread per hero
 
-        BookLearnActionUntilNight(BookHeap bookHeap, Hero... persons) {
-            super(persons);
+        BookLearnUntilNightAction(BookHeap bookHeap, Hero... heroes) {
+            super(heroes);
             this.bookHeap = bookHeap;
+            this.customForkJoinPool = new ForkJoinPool(heroes.length); // custom work dividing between every person in parallel
         }
 
         @Override
         public void run() {
-//            bookHeap.
-            System.out.printf("CloseDownAction process between %s%n", PersonUtilityHelper.getPersonNamesByPersons(persons)); // TODO
+            long startTime = System.currentTimeMillis();
+            while (System.currentTimeMillis() - startTime < TIME_UNTIL_NIGHT_MS) {
+                customForkJoinPool.submit(() -> bookHeap.books.parallelStream().forEach(this::learnBook));
+            }
+            LOGGER.info("Night came");
         }
 
         private void learnBook(Book book) {
-            LOGGER.info("Learning book %s".formatted(book)); // todo
+            try {
+                Thread.sleep(300L);
+                LOGGER.info("Learning book %s".formatted(book.bookName));
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
-    private static class PersonUtilityHelper{
+    private static class PersonUtilityHelper {
         public static List<String> getPersonNamesByPersons(List<Hero> persons) {
             return persons.stream().map(p -> p.name).toList();
         }
